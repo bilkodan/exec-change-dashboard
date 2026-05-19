@@ -4,16 +4,18 @@ Sends Gmail email alerts when a match is found.
 Run as a standalone background process (alongside monitor.py on Railway).
 """
 
-import feedparser
 import html
 import logging
 import os
 import re
 import smtplib
 import time
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
+import requests
 
 import Db
 
@@ -119,27 +121,34 @@ def send_email_alert(post_url: str, post_text: str, companies: list[str], publis
         log.error(f"Email send failed: {exc}")
 
 
+def _parse_rss(xml_text: str) -> list[dict]:
+    """Parse RSS XML and return list of entry dicts."""
+    root = ET.fromstring(xml_text)
+    ns = {"content": "http://purl.org/rss/1.0/modules/content/"}
+    entries = []
+    for item in root.findall(".//item"):
+        guid = item.findtext("guid") or item.findtext("link") or ""
+        link = item.findtext("link") or ""
+        pub = item.findtext("pubDate") or str(datetime.utcnow())
+        # prefer content:encoded for full text, fall back to description
+        body = item.find("content:encoded", ns)
+        raw = body.text if body is not None else (item.findtext("description") or "")
+        entries.append({"id": guid, "link": link, "published": pub, "raw": raw or ""})
+    return entries
+
+
 def process_feed() -> None:
-    feed = feedparser.parse(TRUTH_SOCIAL_RSS)
+    resp = requests.get(TRUTH_SOCIAL_RSS, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+    resp.raise_for_status()
 
-    if feed.bozo:
-        log.warning(f"RSS parse warning: {feed.bozo_exception}")
-
-    for entry in feed.entries:
-        post_id = entry.get("id") or entry.get("link", "")
-        if not post_id:
+    for entry in _parse_rss(resp.text):
+        post_id = entry["id"]
+        if not post_id or Db.trump_post_seen(post_id):
             continue
 
-        if Db.trump_post_seen(post_id):
-            continue
-
-        raw = entry.get("summary") or ""
-        if not raw and entry.get("content"):
-            raw = entry["content"][0].get("value", "")
-
-        text = _strip_html(raw)
-        published = entry.get("published", str(datetime.utcnow()))
-        post_url = entry.get("link", "")
+        text = _strip_html(entry["raw"])
+        published = entry["published"]
+        post_url = entry["link"]
 
         if INVESTMENT_RE.search(text):
             companies = extract_companies(text)
