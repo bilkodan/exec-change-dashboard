@@ -87,3 +87,72 @@ def fetch_all():
 
     conn.close()
     return rows
+
+
+def init_trump_alerts():
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS trump_alerts (
+        id TEXT PRIMARY KEY,
+        text TEXT,
+        post_url TEXT,
+        published TEXT,
+        companies TEXT,
+        alerted_at TEXT
+    )
+    """)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS trump_seen (
+        id TEXT PRIMARY KEY
+    )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def trump_post_seen(post_id: str) -> bool:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute(
+        "SELECT 1 FROM trump_alerts WHERE id = ? UNION SELECT 1 FROM trump_seen WHERE id = ?",
+        (post_id, post_id),
+    )
+    result = c.fetchone()
+    conn.close()
+    return result is not None
+
+
+def insert_trump_alert(row: dict):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute(
+        "INSERT OR IGNORE INTO trump_alerts VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            row.get("id"),
+            row.get("text"),
+            row.get("post_url"),
+            row.get("published"),
+            row.get("companies"),
+            row.get("alerted_at"),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def mark_trump_seen(post_id: str):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO trump_seen VALUES (?)", (post_id,))
+    conn.commit()
+    conn.close()
+
+
+def fetch_trump_alerts():
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM trump_alerts ORDER BY published DESC")
+    rows = c.fetchall()
+    conn.close()
+    return rows

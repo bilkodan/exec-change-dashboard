@@ -24,7 +24,40 @@ def load_data() -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=60)
+def load_trump_alerts() -> pd.DataFrame:
+    try:
+        conn = sqlite3.connect("exec_changes.db", check_same_thread=False)
+        df = pd.read_sql("SELECT * FROM trump_alerts ORDER BY published DESC", conn)
+        conn.close()
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
 df = load_data()
+trump_df = load_trump_alerts()
+
+# ── Trump Investment Alerts ───────────────────────────────────────────────────
+st.subheader("🇺🇸 Trump Investment Alerts")
+st.caption("Triggered when Trump mentions US investment in a public company on Truth Social")
+
+if trump_df.empty:
+    st.info("No Trump investment mentions detected yet. Monitoring Truth Social every 5 minutes.")
+else:
+    st.metric("Total Trump Alerts", len(trump_df))
+    for _, row in trump_df.iterrows():
+        companies = row.get("companies") or "unspecified"
+        published = row.get("published", "")
+        text = row.get("text", "")
+        post_url = row.get("post_url", "")
+        with st.container(border=True):
+            st.markdown(f"**{published}** &nbsp;|&nbsp; Companies: `{companies}`")
+            st.markdown(f"> {text[:600]}{'…' if len(text) > 600 else ''}")
+            if post_url:
+                st.markdown(f"[View post]({post_url})")
+
+st.divider()
 
 # ── Summary metrics ───────────────────────────────────────────────────────────
 c1, c2, c3, c4 = st.columns(4)
